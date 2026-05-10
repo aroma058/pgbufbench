@@ -6,7 +6,7 @@ database:
   password: bgbench123
 workload:
   type: tpcb
-  scale: 100
+  scale: 1000
   clients: 8
   threads: 4
   duration: 600

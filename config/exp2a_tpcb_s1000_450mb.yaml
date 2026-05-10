@@ -6,12 +6,12 @@ database:
   password: bgbench123
 workload:
   type: tpcb
-  scale: 50
+  scale: 1000
   clients: 8
   threads: 4
   duration: 600
 postgresql:
-  shared_buffers: 375MB
+  shared_buffers: 450MB
   checkpoint_timeout: 5min
   checkpoint_completion_target: 0.9
   autovacuum: on
