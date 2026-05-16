@@ -6,7 +6,7 @@ database:
   password: bgbench123
 workload:
   type: ycsb
-  scale: 5
+  scale: 40
   clients: 8
   threads: 4
   duration: 600
@@ -19,7 +19,7 @@ workload:
       rmw: 5
       delete: 0
 postgresql:
-  shared_buffers: 180MB
+  shared_buffers: 150MB
   checkpoint_timeout: 5min
   checkpoint_completion_target: 0.9
   autovacuum: on

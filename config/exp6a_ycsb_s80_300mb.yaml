@@ -6,7 +6,7 @@ database:
   password: bgbench123
 workload:
   type: ycsb
-  scale: 5
+  scale: 80
   clients: 8
   threads: 4
   duration: 600
