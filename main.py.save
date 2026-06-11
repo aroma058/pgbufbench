@@ -32,7 +32,7 @@ def get_workload(config):
     elif workload_type == 'tpch':
         return TPCHWorkload(config)
     elif workload_type == 'tatp':
-        return TATpWorkload(config)
+        return TATWorkload(config)
     else:
         print(f"[Main] Unknown workload type: {workload_type}")
         sys.exit(1)
@@ -100,7 +100,7 @@ def main():
     else:
         print("[Main] No summary file found to plot.")
 
-    if workload_type in ('chbenchmark'):
+    if workload_type == 'chbenchmark':
         summary = workload.get_analytical_summary()
         if summary:
             print("\n[CH] ── Analytical Query Summary ────────────")
@@ -112,31 +112,6 @@ def main():
                 print(f"  {q:<8} {s['count']:>6} {s['avg_ms']:>10} "
                       f"{s['p50_ms']:>10} {s['p99_ms']:>10}")
             print("[CH] ─────────────────────────────────────────")
-
-    if workload_type in ('tpch'):
-        summary = workload.get_analytical_summary()
-        if summary:
-            print("\n[TPC-H] ── Query Summary ────────────────────")
-            print(f"  {'Query':<8} {'Count':>6} {'Avg(ms)':>10} {'P50(ms)':>10} {'P99(ms)':>10} {'Q/hour':>10}")
-            print(f"  {'-'*8} {'-'*6} {'-'*10} {'-'*10} {'-'*10} {'-'*10}")
-            total_qph = 0
-            rows = []
-            for q in sorted(summary.keys()):
-                s = summary[q]
-                print(f"  {q:<8} {s['count']:>6} {s['avg_ms']:>10} {s['p50_ms']:>10} {s['p99_ms']:>10} {s['qph']:>10}")
-                total_qph += s['qph']
-                rows.append(s | {'query': q})
-            print(f"  {'TOTAL':<8} {'':>6} {'':>10} {'':>10} {'':>10} {round(total_qph,1):>10}")
-            print("[TPC-H] ─────────────────────────────────────")
-            # save to CSV
-            if run_id:
-                import csv as _csv
-                qph_path = os.path.join(config['output']['results_dir'], f"tpch_qph_{run_id}.csv")
-                with open(qph_path, 'w', newline='') as f:
-                    writer = _csv.DictWriter(f, fieldnames=['query','count','avg_ms','p50_ms','p99_ms','qph'])
-                    writer.writeheader()
-                    writer.writerows(rows)
-                print(f"[TPC-H] Q/hour saved to {qph_path}")
 
     if run_id:
         print("[Main] Running interference analysis...")

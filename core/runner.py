@@ -7,6 +7,7 @@ from queue import Queue, Empty
 from datetime import datetime
 from monitor.collector import BufferPoolMonitor
 
+
 class BenchmarkRunner:
     def __init__(self, config, workload):
         self.config      = config
@@ -42,6 +43,37 @@ class BenchmarkRunner:
         cur.close()
         conn.close()
         print("[Runner] Stats reset.")
+
+    def clear_caches(self):
+        """Clear OS page cache and restart PostgreSQL to cold-start the buffer pool."""
+        import subprocess
+
+        # Step 1 — flush dirty pages to disk first
+        try:
+            subprocess.run(['sync'], check=True)
+            print("[Runner] sync complete.")
+        except Exception as e:
+            print(f"[Runner] WARNING: sync failed: {e}")
+
+            # Step 2 — drop OS page cache (requires passwordless sudo)
+        try:
+            subprocess.run(
+                ['sudo', 'sh', '-c', 'echo 3 > /proc/sys/vm/drop_caches'],
+                check=True)
+            print("[Runner] OS page cache cleared.")
+        except Exception as e:
+            print(f"[Runner] WARNING: Could not clear OS cache: {e}")
+            print("[Runner] Run manually: sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'")
+
+        # Step 3 — restart PostgreSQL to clear shared_buffers
+        try:
+            subprocess.run(
+                ['sudo', 'systemctl', 'restart', 'postgresql'],
+                check=True)
+            time.sleep(5)  # wait for PostgreSQL to come back up
+            print("[Runner] PostgreSQL restarted — shared_buffers cleared.")
+        except Exception as e:
+            print(f"[Runner] WARNING: Could not restart PostgreSQL: {e}")
 
     def get_db_size(self):
         conn = self.workload.get_connection()
@@ -92,12 +124,80 @@ class BenchmarkRunner:
         """)
         tables = [row[0] for row in cur.fetchall()]
         if tables:
-            cur.execute("DROP TABLE IF EXISTS " + ", ".join(tables) + " CASCADE")
-            print(f"[Runner] Dropped {len(tables)} existing tables: {', '.join(tables)}")
+            cur.execute(
+                "DROP TABLE IF EXISTS " + ", ".join(tables) + " CASCADE")
+            print(f"[Runner] Dropped {len(tables)} existing tables: "
+                  f"{', '.join(tables)}")
         else:
             print("[Runner] Database is already clean.")
         cur.close()
         conn.close()
+
+    def check_data_exists(self):
+        """Returns True if at least one public table exists and has rows."""
+        conn = self.workload.get_connection()
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT tablename FROM pg_tables
+            WHERE schemaname = 'public'
+              AND tablename NOT LIKE 'pg_%'
+        """)
+        tables = [row[0] for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        if not tables:
+            return False
+        conn = self.workload.get_connection()
+        conn.autocommit = True
+        cur = conn.cursor()
+        try:
+            cur.execute(f"SELECT 1 FROM {tables[0]} LIMIT 1")
+            exists = cur.fetchone() is not None
+        except Exception:
+            exists = False
+        cur.close()
+        conn.close()
+        return exists
+
+    def check_workload_matches(self):
+        """Returns True if existing tables match the configured workload.
+        Prints a warning and returns False if there is a mismatch."""
+        conn = self.workload.get_connection()
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT tablename FROM pg_tables
+            WHERE schemaname = 'public'
+              AND tablename NOT LIKE 'pg_%'
+            ORDER BY tablename
+        """)
+        existing = set(row[0] for row in cur.fetchall())
+        cur.close()
+        conn.close()
+
+        expected = {
+            'tpcb':        {'accounts', 'branches', 'tellers', 'history'},
+            'tpcc':        {'warehouse', 'district', 'customer', 'orders',
+                            'order_line', 'new_orders', 'stock',
+                            'item', 'history'},
+            'ycsb':        {'usertable'},
+            'tatp':        {'subscriber', 'access_info',
+                            'special_facility', 'call_forwarding'},
+            'chbenchmark': {'warehouse', 'district', 'customer', 'orders',
+                            'order_line', 'new_orders', 'stock',
+                            'item', 'history'},
+            'tpch':        {'lineitem', 'orders', 'customer', 'part',
+                            'supplier', 'partsupp', 'nation', 'region'},
+        }
+        workload_type = self.config['workload']['type']
+        expected_tables = expected.get(workload_type, set())
+        if not expected_tables.issubset(existing):
+            print(f"[Runner] WARNING: existing tables {existing} do not "
+                  f"match expected tables for {workload_type}: "
+                  f"{expected_tables}.")
+            return False
+        return True
 
     def setup(self):
         print("[Runner] Setting up workload...")
@@ -118,6 +218,7 @@ class BenchmarkRunner:
         print(f"[Runner] Clients:   {self.num_clients}")
         print(f"[Runner] Duration:  {self.duration}s\n")
 
+        self.clear_caches()
         self.apply_pg_settings()
         self.reset_stats()
 
@@ -188,7 +289,8 @@ class BenchmarkRunner:
             'p99_latency': round(latencies_arr[int(total * 0.99)], 2),
             'tps':         round(total / self.duration, 2),
         }
-        filepath = os.path.join(self.results_dir, f"summary_{run_id}.csv")
+        filepath = os.path.join(
+            self.results_dir, f"summary_{run_id}.csv")
         with open(filepath, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=summary.keys())
             writer.writeheader()
